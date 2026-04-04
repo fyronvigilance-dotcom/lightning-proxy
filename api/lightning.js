@@ -1,41 +1,82 @@
-const WebSocket = require('ws')
+const { createServer } = require('http')
 
-let strikes = []
-let ws = null
-let connected = false
+// Cache en mémoire global (persiste entre les requêtes sur le même worker)
+global.strikes = global.strikes || []
+global.lastFetch = global.lastFetch || 0
 
-function connect() {
-  try {
-    ws = new WebSocket('wss://ws.blitzortung.org:443/', {
-      headers: { Origin: 'https://www.blitzortung.org' }
+async function fetchFromBlitzortung() {
+  const now = Date.now() / 1000
+  if (now - global.lastFetch < 30) return // max 1 fetch toutes les 30s
+
+  return new Promise((resolve) => {
+    const WebSocket = require('ws')
+    const collected = []
+    let done = false
+
+    const ws = new WebSocket('wss://ws.blitzortung.org:443/', {
+      headers: { Origin: 'https://www.blitzortung.org' },
+      handshakeTimeout: 5000,
     })
+
+    const timeout = setTimeout(() => {
+      if (!done) { done = true; try { ws.close() } catch(e){} resolve(collected) }
+    }, 8000)
+
     ws.on('open', () => {
-      connected = true
-      ws.send(JSON.stringify({ west:-5.5, east:10.0, north:51.5, south:41.0 }))
+      ws.send(JSON.stringify({ west: -5.5, east: 10.0, north: 51.5, south: 41.0 }))
     })
+
     ws.on('message', (data) => {
       try {
         const d = JSON.parse(data.toString())
         if (d.lat && d.lon) {
-          strikes.unshift({ lat:d.lat, lon:d.lon, t:d.time || Date.now()/1000 })
-          if (strikes.length > 300) strikes = strikes.slice(0,300)
+          collected.push({ lat: d.lat, lon: d.lon, t: d.time || Date.now()/1000 })
+        }
+        // Après 20 impacts collectés on ferme
+        if (collected.length >= 20 && !done) {
+          done = true
+          clearTimeout(timeout)
+          try { ws.close() } catch(e){}
+          resolve(collected)
         }
       } catch(e) {}
     })
-    ws.on('close', () => { connected=false; setTimeout(connect, 3000) })
-    ws.on('error', () => { connected=false; setTimeout(connect, 5000) })
-  } catch(e) { setTimeout(connect, 5000) }
+
+    ws.on('error', () => {
+      if (!done) { done = true; clearTimeout(timeout); resolve(collected) }
+    })
+
+    ws.on('close', () => {
+      if (!done) { done = true; clearTimeout(timeout); resolve(collected) }
+    })
+  })
 }
 
-connect()
-
-module.exports = (req, res) => {
+module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Cache-Control', 'no-cache')
-  const since = parseFloat(req.query.since || 0)
-  const now   = Date.now() / 1000
-  const result = since > 0
-    ? strikes.filter(s => s.t > since)
-    : strikes.slice(0, 100)
-  res.json({ strikes: result, ts: now, connected, total: strikes.length })
+
+  try {
+    const newStrikes = await fetchFromBlitzortung()
+
+    if (newStrikes.length > 0) {
+      global.lastFetch = Date.now() / 1000
+      // Ajoute les nouveaux et garde les 300 derniers
+      global.strikes = [...newStrikes, ...global.strikes].slice(0, 300)
+    }
+
+    const since = parseFloat(req.query.since || 0)
+    const result = since > 0
+      ? global.strikes.filter(s => s.t > since)
+      : global.strikes.slice(0, 100)
+
+    res.json({
+      strikes: result,
+      ts: Date.now() / 1000,
+      total: global.strikes.length,
+      fresh: newStrikes.length
+    })
+  } catch(e) {
+    res.json({ strikes: [], ts: Date.now()/1000, error: e.message })
+  }
 }

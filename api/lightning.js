@@ -1,4 +1,5 @@
 const WebSocket = require('ws')
+const https = require('https')
 
 global.strikes = global.strikes || []
 global.lastFetch = global.lastFetch || 0
@@ -6,7 +7,6 @@ global.lastFetch = global.lastFetch || 0
 async function fetchFromBlitzortung() {
   const now = Date.now() / 1000
   if (now - global.lastFetch < 30) return []
-
   return new Promise((resolve) => {
     const collected = []
     let done = false
@@ -15,23 +15,50 @@ async function fetchFromBlitzortung() {
       handshakeTimeout: 5000,
     })
     const timeout = setTimeout(() => {
-      if (!done) { done = true; try { ws.close() } catch(e){} resolve(collected) }
+      if (!done) { done=true; try{ws.close()}catch(e){} resolve(collected) }
     }, 8000)
-    ws.on('open', () => {
-      ws.send(JSON.stringify({ west:-5.5, east:10.0, north:51.5, south:41.0 }))
-    })
+    ws.on('open', () => ws.send(JSON.stringify({ west:-5.5, east:10.0, north:51.5, south:41.0 })))
     ws.on('message', (data) => {
       try {
         const d = JSON.parse(data.toString())
-        if (d.lat && d.lon) collected.push({ lat:d.lat, lon:d.lon, t:d.time || Date.now()/1000 })
-        if (collected.length >= 20 && !done) {
-          done = true; clearTimeout(timeout)
-          try { ws.close() } catch(e){} resolve(collected)
+        if (d.lat && d.lon) collected.push({ lat:d.lat, lon:d.lon, t:d.time||Date.now()/1000 })
+        if (collected.length>=20 && !done) {
+          done=true; clearTimeout(timeout); try{ws.close()}catch(e){} resolve(collected)
         }
       } catch(e) {}
     })
-    ws.on('error', () => { if (!done) { done=true; clearTimeout(timeout); resolve(collected) } })
-    ws.on('close', () => { if (!done) { done=true; clearTimeout(timeout); resolve(collected) } })
+    ws.on('error', ()=>{ if(!done){done=true;clearTimeout(timeout);resolve(collected)} })
+    ws.on('close', ()=>{ if(!done){done=true;clearTimeout(timeout);resolve(collected)} })
+  })
+}
+
+// Proxy pour les tuiles WMS Météo-France (évite CORS)
+async function proxyMFTile(req, res) {
+  const token = process.env.MF_TOKEN || ''
+  const bbox  = req.query.bbox || ''
+  const width = req.query.width || '256'
+  const height= req.query.height || '256'
+  const time  = req.query.time || ''
+
+  const url = `https://public-api.meteofrance.fr/public/DPRadar/v1/mosaique/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap&FORMAT=image/png&TRANSPARENT=true&LAYERS=PRECIPITATIONS&CRS=EPSG:3857&WIDTH=${width}&HEIGHT=${height}&BBOX=${bbox}${time ? '&TIME='+time : ''}`
+
+  return new Promise((resolve) => {
+    const options = {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'image/png'
+      }
+    }
+    https.get(url, options, (mfRes) => {
+      res.setHeader('Access-Control-Allow-Origin', '*')
+      res.setHeader('Content-Type', 'image/png')
+      res.setHeader('Cache-Control', 'public, max-age=300')
+      mfRes.pipe(res)
+      resolve()
+    }).on('error', (e) => {
+      res.status(500).json({ error: e.message })
+      resolve()
+    })
   })
 }
 
@@ -39,11 +66,34 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Cache-Control', 'no-cache')
 
-// Route token MF
+  // Route token MF
   if (req.query['mf-token']) {
     return res.json({ token: process.env.MF_TOKEN || '' })
   }
 
+  // Route proxy tuiles MF
+  if (req.query['mf-tile']) {
+    return proxyMFTile(req, res)
+  }
+
+  // Route capabilities MF (liste des temps disponibles)
+  if (req.query['mf-caps']) {
+    const token = process.env.MF_TOKEN || ''
+    return new Promise((resolve) => {
+      const url = 'https://public-api.meteofrance.fr/public/DPRadar/v1/mosaique/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities'
+      https.get(url, { headers: { Authorization: `Bearer ${token}` } }, (mfRes) => {
+        let data = ''
+        mfRes.on('data', chunk => data += chunk)
+        mfRes.on('end', () => {
+          res.setHeader('Content-Type', 'text/xml')
+          res.send(data)
+          resolve()
+        })
+      }).on('error', (e) => { res.status(500).json({ error: e.message }); resolve() })
+    })
+  }
+
+  // Route foudre Blitzortung
   try {
     const newStrikes = await fetchFromBlitzortung()
     if (newStrikes.length > 0) {

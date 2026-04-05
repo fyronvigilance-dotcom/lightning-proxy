@@ -1,3 +1,4 @@
+const MF_TOKEN = process.env.MF_TOKEN
 const { createServer } = require('http')
 
 // Cache en mémoire global (persiste entre les requêtes sur le même worker)

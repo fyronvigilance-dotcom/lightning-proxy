@@ -39,8 +39,8 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Cache-Control', 'no-cache')
 
-  // Route pour le token Météo-France
-  if (req.url && req.url.includes('/mf-token')) {
+// Route token MF
+  if (req.query['mf-token']) {
     return res.json({ token: process.env.MF_TOKEN || '' })
   }
 

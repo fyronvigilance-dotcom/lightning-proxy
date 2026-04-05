@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100vw; height:100vh; overflow:hidden; background:#0a0e14; font-family:system-ui,sans-serif; }
+#map { position:absolute; inset:50px 0 90px 0; }
+
+/* Tuiles sombres */
+.leaflet-tile { filter:brightness(0.25) saturate(0.3) hue-rotate(200deg); }
+.leaflet-control-attribution { display:none!important; }
+.leaflet-control-zoom { border:1px solid rgba(234,179,8,0.3)!important; border-radius:8px!important; overflow:hidden; margin-top:8px!important; margin-right:8px!important; }
+.leaflet-control-zoom a { background:#0d1117!important; color:#eab308!important; border-color:rgba(234,179,8,0.2)!important; font-size:16px!important; }
+
+/* Header */
+#header {
+  position:absolute; top:0; left:0; right:0; height:50px; z-index:1000;
+  background:#0a0e14; border-bottom:1px solid rgba(234,179,8,0.25);
+  display:flex; align-items:center; padding:0 14px; gap:12px;
+}
+#logo { color:#facc15; font-size:14px; font-weight:900; letter-spacing:0.12em; flex:1; }
+#logo span { color:rgba(234,179,8,0.35); font-weight:400; font-size:10px; margin-left:6px; }
+#htime { color:rgba(234,179,8,0.6); font-size:11px; font-weight:600; }
+#hcount { background:rgba(234,179,8,0.08); border:1px solid rgba(234,179,8,0.25); color:#facc15; font-size:11px; font-weight:700; padding:3px 10px; border-radius:20px; }
+.lpill { display:flex; align-items:center; gap:4px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:#f87171; font-size:10px; font-weight:800; padding:3px 8px; border-radius:20px; letter-spacing:0.08em; }
+.ldot { width:5px; height:5px; background:#ef4444; border-radius:50%; animation:lp 1.2s infinite; }
+@keyframes lp { 0%,100%{opacity:1} 50%{opacity:0.15} }
+
+/* Boutons couches */
+#layers {
+  position:absolute; top:58px; right:10px; z-index:1000;
+  display:flex; flex-direction:column; gap:5px;
+}
+.lb {
+  background:rgba(10,14,20,0.92); border:1px solid rgba(234,179,8,0.2);
+  color:rgba(234,179,8,0.5); font-size:11px; font-weight:700;
+  padding:8px 14px; border-radius:8px; cursor:pointer;
+  transition:all 0.2s; letter-spacing:0.04em; user-select:none;
+}
+.lb:hover { color:#eab308; border-color:rgba(234,179,8,0.5); background:rgba(234,179,8,0.06); }
+.lb.on { color:#facc15; border-color:#facc15; background:rgba(234,179,8,0.12); }
+
+/* Légende */
+#legend {
+  position:absolute; top:58px; left:10px; z-index:1000;
+  background:rgba(10,14,20,0.92); border:1px solid rgba(234,179,8,0.2);
+  border-radius:10px; padding:10px 13px;
+}
+#leg-title { color:#eab308; font-size:9px; font-weight:800; letter-spacing:0.1em; margin-bottom:8px; }
+.lr { display:flex; align-items:center; gap:8px; margin:4px 0; font-size:9px; color:rgba(255,255,255,0.45); }
+.lc { width:24px; height:6px; border-radius:2px; flex-shrink:0; }
+
+/* Timeline */
+#timeline {
+  position:absolute; bottom:0; left:0; right:0; height:90px; z-index:1000;
+  background:#0a0e14; border-top:1px solid rgba(234,179,8,0.25);
+  padding:10px 16px 12px; display:flex; flex-direction:column; gap:8px;
+}
+#tl-row { display:flex; align-items:center; gap:8px; }
+.cb {
+  background:rgba(234,179,8,0.08); border:1px solid rgba(234,179,8,0.25);
+  color:#eab308; border-radius:7px; cursor:pointer; font-size:13px;
+  display:flex; align-items:center; justify-content:center;
+  transition:all 0.15s; user-select:none; flex-shrink:0;
+  width:32px; height:32px;
+}
+.cb:hover { background:rgba(234,179,8,0.18); border-color:#eab308; }
+.cb#playbtn { width:38px; height:38px; font-size:16px; border-radius:9px; }
+.cb#playbtn.on { background:rgba(234,179,8,0.2); border-color:#facc15; color:#facc15; }
+#tl-time { color:rgba(234,179,8,0.5); font-size:10px; font-weight:600; letter-spacing:0.06em; flex:1; text-align:right; }
+#scrub-wrap { position:relative; cursor:pointer; }
+#scrub-bg { height:5px; background:rgba(234,179,8,0.1); border-radius:3px; }
+#scrub-fill { position:absolute; top:0; left:0; height:5px; background:linear-gradient(90deg,rgba(234,179,8,0.4),#facc15); border-radius:3px; pointer-events:none; width:100%; transition:width 0.15s; }
+#ticks { display:flex; gap:2px; margin-top:5px; }
+.tk { flex:1; height:5px; background:rgba(234,179,8,0.12); border-radius:2px; cursor:pointer; transition:background 0.15s; }
+.tk.on { background:#facc15; }
+
+/* Éclairs */
+@keyframes bf { 0%{opacity:0;transform:scale(0.3)} 20%{opacity:1;transform:scale(1.4)} 50%{opacity:0.8;transform:scale(1)} 100%{opacity:0} }
+.bolt { animation:bf 2.5s ease-out forwards; font-size:16px; filter:drop-shadow(0 0 8px #facc15); pointer-events:none; }
+
+/* Tooltip */
+.leaflet-tooltip { background:rgba(10,14,20,0.95)!important; border:1px solid rgba(234,179,8,0.35)!important; color:#facc15!important; font-size:11px!important; border-radius:7px!important; padding:5px 9px!important; box-shadow:none!important; }
+.leaflet-tooltip::before { display:none!important; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div id="header">
+  <div id="logo">⚡ STORMRADAR <span>FRANCE</span></div>
+  <div id="hcount">⚡ 0 impacts</div>
+  <div id="htime">--:-- UTC</div>
+  <div class="lpill"><div class="ldot"></div>LIVE</div>
+</div>
+
+<!-- Carte -->
+<div id="map"></div>
+
+<!-- Couches -->
+<div id="layers">
+  <div class="lb on" id="lb-radar"     onclick="setMode('radar')">🌧 Radar</div>
+  <div class="lb"    id="lb-sat"       onclick="setMode('satellite')">🛰 Satellite</div>
+  <div class="lb"    id="lb-foudre"    onclick="toggleFoudre()">⚡ Foudre</div>
+  <div class="lb"    id="lb-cape"      onclick="toggleCape()">🌩 CAPE</div>
+</div>
+
+<!-- Légende -->
+<div id="legend">
+  <div id="leg-title">PRÉCIPITATIONS mm/h</div>
+  <div class="lr"><div class="lc" style="background:linear-gradient(90deg,#1a44ff,#00aaff)"></div>0.1 – 1</div>
+  <div class="lr"><div class="lc" style="background:linear-gradient(90deg,#00dd00,#aaff00)"></div>1 – 5</div>
+  <div class="lr"><div class="lc" style="background:linear-gradient(90deg,#ffee00,#ffaa00)"></div>5 – 20</div>
+  <div class="lr"><div class="lc" style="background:linear-gradient(90deg,#ff4400,#ff0000)"></div>20 – 50</div>
+  <div class="lr"><div class="lc" style="background:linear-gradient(90deg,#bb00ff,#ff00cc)"></div>&gt; 50</div>
+</div>
+
+<!-- Timeline -->
+<div id="timeline">
+  <div id="tl-row">
+    <div class="cb" onclick="step(-1)">◀</div>
+    <div class="cb" id="playbtn" onclick="togglePlay()">▶</div>
+    <div class="cb" onclick="step(1)">▶▶</div>
+    <div id="tl-time">← PASSÉ &nbsp;|&nbsp; PRÉSENT →</div>
+  </div>
+  <div id="scrub-wrap" onclick="scrubClick(event)">
+    <div id="scrub-bg"></div>
+    <div id="scrub-fill"></div>
+  </div>
+  <div id="ticks"></div>
+</div>
+
+<script>
+// ── CONFIG ────────────────────────────────────────────
+const PROXY = 'https://lightning-proxy-6n9p.vercel.app/api/lightning'
+const RV    = 'https://api.rainviewer.com/public/weather-maps.json'
+const SIZE  = 512
+
+// ── CARTE ─────────────────────────────────────────────
+const map = L.map('map', {
+  zoomControl: true,
+  attributionControl: false
+}).setView([46.5, 2.5], 5)
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  subdomains: 'abcd', maxZoom: 18, minZoom: 3
+}).addTo(map)
+
+// Villes
+const villes = [
+  ['Paris',48.85,2.35],['Lyon',45.75,4.85],['Marseille',43.30,5.37],
+  ['Bordeaux',44.84,-0.58],['Toulouse',43.60,1.44],['Nantes',47.22,-1.55],
+  ['Strasbourg',48.57,7.75],['Lille',50.63,3.06],['Nice',43.71,7.26],
+  ['Rennes',48.11,-1.68],['Montpellier',43.61,3.88],['Grenoble',45.19,5.72],
+  ['Metz',49.12,6.18],['Brest',48.39,-4.49],['Clermont-Fd',45.78,3.08]
+]
+villes.forEach(([n,lat,lng]) => {
+  L.circleMarker([lat,lng], {
+    radius:3, color:'rgba(234,179,8,0.6)',
+    fillColor:'rgba(234,179,8,0.4)', fillOpacity:1, weight:1
+  }).bindTooltip(n, {permanent:false, direction:'top', offset:[0,-5]})
+    .addTo(map)
+})
+
+// ── STATE ─────────────────────────────────────────────
+let rvData = null, frames = [], cur = 0
+let radarLayer = null, capeLayer = null
+let mode = 'radar', foudreOn = false, capeOn = false
+let playing = false, playTimer = null
+let bolts = [], lastTs = 0, nbStrikes = 0
+let pollTimer = null, simTimer = null
+
+// ── RAINVIEWER ────────────────────────────────────────
+async function initRadar() {
+  try {
+    const r = await fetch(RV)
+    rvData = await r.json()
+    buildFrames()
+    buildTicks()
+    goToFrame(frames.length - 1)
+  } catch(e) { console.error('RainViewer error', e) }
+}
+
+function buildFrames() {
+  if (mode === 'radar') {
+    frames = [...(rvData?.radar?.past || [])]
+    const nc = rvData?.radar?.nowcast || []
+    frames = frames.concat(nc)
+  } else {
+    frames = [...(rvData?.satellite?.infrared || [])]
+  }
+}
+
+function goToFrame(i) {
+  cur = Math.max(0, Math.min(i, frames.length - 1))
+  if (radarLayer) { map.removeLayer(radarLayer); radarLayer = null }
+  if (!frames.length) return
+
+  const f = frames[cur]
+  const color = mode === 'satellite' ? 0 : 2
+  const url = `${rvData.host}${f.path}/${SIZE}/{z}/{x}/{y}/${color}/1_1.png`
+
+  radarLayer = L.tileLayer(url, {
+    opacity: 0.85,
+    tileSize: SIZE,
+    zoomOffset: 0,
+    maxNativeZoom: 7,
+    maxZoom: 13,
+    minZoom: 3,
+    zIndex: 10,
+    crossOrigin: true
+  }).addTo(map)
+
+  // Heure locale France
+  const d = new Date(f.time * 1000)
+  const hh = d.getHours().toString().padStart(2,'0')
+  const mm = d.getMinutes().toString().padStart(2,'0')
+  const dd = d.getDate().toString().padStart(2,'0')
+  const mo = (d.getMonth()+1).toString().padStart(2,'0')
+  document.getElementById('htime').textContent = `${dd}/${mo} ${hh}:${mm} heure locale`
+
+  updateScrub()
+  updateTicks()
+}
+
+function buildTicks() {
+  const el = document.getElementById('ticks')
+  el.innerHTML = frames.map((_,i) =>
+    `<div class="tk ${i===cur?'on':''}" onclick="goToFrame(${i})"></div>`
+  ).join('')
+}
+
+function updateTicks() {
+  document.querySelectorAll('.tk').forEach((t,i) =>
+    t.classList.toggle('on', i === cur)
+  )
+}
+
+function updateScrub() {
+  const pct = frames.length > 1 ? (cur / (frames.length-1)) * 100 : 100
+  document.getElementById('scrub-fill').style.width = pct + '%'
+}
+
+function step(d) { goToFrame(cur + d) }
+
+function togglePlay() {
+  playing = !playing
+  const b = document.getElementById('playbtn')
+  b.textContent = playing ? '⏸' : '▶'
+  b.classList.toggle('on', playing)
+  if (playing) {
+    playTimer = setInterval(() => {
+      goToFrame(cur + 1 >= frames.length ? 0 : cur + 1)
+    }, 600)
+  } else {
+    clearInterval(playTimer)
+  }
+}
+
+function scrubClick(e) {
+  const r = document.getElementById('scrub-bg').getBoundingClientRect()
+  const pct = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))
+  goToFrame(Math.round(pct * (frames.length - 1)))
+}
+
+// ── MODES ─────────────────────────────────────────────
+function setMode(m) {
+  mode = m
+  document.getElementById('lb-radar').classList.toggle('on', m==='radar')
+  document.getElementById('lb-sat').classList.toggle('on', m==='satellite')
+  document.getElementById('leg-title').textContent =
+    m === 'radar' ? 'PRÉCIPITATIONS mm/h' : 'SATELLITE INFRAROUGE'
+  buildFrames()
+  buildTicks()
+  goToFrame(frames.length - 1)
+}
+
+// ── CAPE ──────────────────────────────────────────────
+async function toggleCape() {
+  capeOn = !capeOn
+  document.getElementById('lb-cape').classList.toggle('on', capeOn)
+  if (!capeOn) {
+    if (capeLayer) { map.removeLayer(capeLayer); capeLayer = null }
+    return
+  }
+  const pts = villes.map(v => [v[1], v[2]])
+  const lats = pts.map(p=>p[0]).join(',')
+  const lngs = pts.map(p=>p[1]).join(',')
+  try {
+    const r = await fetch(
+      `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lngs}&hourly=cape&forecast_days=1&timezone=Europe%2FParis`
+    )
+    const arr = await r.json()
+    const data = Array.isArray(arr) ? arr : [arr]
+    capeLayer = L.layerGroup()
+    const h = new Date().getHours()
+    data.forEach((d, i) => {
+      const cape = d.hourly?.cape?.[h] || 0
+      if (cape < 50) return
+      const col = cape>2000?'#ef4444':cape>1000?'#f97316':cape>400?'#facc15':'#4ade80'
+      const op  = 0.12 + Math.min(cape/2500, 1) * 0.35
+      L.circle(pts[i], {
+        radius:80000, color:col, fillColor:col,
+        fillOpacity:op, weight:0.8, zIndex:5
+      }).bindTooltip(`${villes[i][0]}<br>CAPE : ${Math.round(cape)} J/kg`)
+        .addTo(capeLayer)
+    })
+    capeLayer.addTo(map)
+  } catch(e) { console.error('CAPE error', e) }
+}
+
+// ── FOUDRE ────────────────────────────────────────────
+function toggleFoudre() {
+  foudreOn = !foudreOn
+  document.getElementById('lb-foudre').classList.toggle('on', foudreOn)
+  if (foudreOn) {
+    poll()
+    pollTimer = setInterval(poll, 15000)
+  } else {
+    clearInterval(pollTimer)
+    clearInterval(simTimer)
+    simTimer = null
+    bolts.forEach(m => { try { map.removeLayer(m) } catch(e){} })
+    bolts = []
+    nbStrikes = 0
+    document.getElementById('hcount').textContent = '⚡ 0 impacts'
+  }
+}
+
+async function poll() {
+  try {
+    const url = lastTs ? `${PROXY}?since=${lastTs}` : PROXY
+    const r   = await fetch(url, { cache:'no-store' })
+    const d   = await r.json()
+    if (d.strikes && d.strikes.length > 0) {
+      lastTs = d.ts
+      clearInterval(simTimer); simTimer = null
+      d.strikes.forEach(s => {
+        if (s.lat<40||s.lat>52||s.lon<-6.5||s.lon>11) return
+        spawnBolt(s.lat, s.lon, true)
+        nbStrikes++
+      })
+      updCount()
+    } else if (!simTimer) {
+      simTimer = setInterval(simStep, 3500)
+      simStep()
+    }
+  } catch(e) {
+    if (!simTimer) { simTimer = setInterval(simStep, 3500); simStep() }
+  }
+}
+
+const ZONES = [
+  [44.5,3.2],[43.5,5.8],[48.2,6.9],[45.0,1.5],
+  [43.3,1.9],[46.5,4.8],[47.5,7.1],[42.8,2.3]
+]
+
+function simStep() {
+  if (!foudreOn) return
+  const z = ZONES[Math.floor(Math.random() * ZONES.length)]
+  const n = Math.floor(Math.random() * 3) + 1
+  for (let i = 0; i < n; i++) {
+    const lat = z[0] + (Math.random()-0.5) * 1.8
+    const lon = z[1] + (Math.random()-0.5) * 1.8
+    if (lat<41||lat>51.5||lon<-5.5||lon>10) continue
+    spawnBolt(lat, lon, false)
+    nbStrikes++
+  }
+  updCount()
+}
+
+function spawnBolt(lat, lon, real) {
+  const icon = L.divIcon({
+    html: '<div class="bolt">⚡</div>',
+    className: '', iconSize:[20,20], iconAnchor:[10,10]
+  })
+  const m = L.marker([lat, lon], { icon, zIndex:50 })
+    .bindTooltip(real ? '⚡ Impact réel' : '⚡ Impact simulé', { sticky:true })
+    .addTo(map)
+  bolts.push(m)
+  setTimeout(() => { try { map.removeLayer(m) } catch(e){} }, real ? 120000 : 2500)
+  if (bolts.length > 400) {
+    const old = bolts.splice(0, bolts.length - 400)
+    old.forEach(m => { try { map.removeLayer(m) } catch(e){} })
+  }
+}
+
+function updCount() {
+  document.getElementById('hcount').textContent = `⚡ ${nbStrikes} impacts`
+}
+
+// ── REFRESH AUTO ──────────────────────────────────────
+setInterval(async () => {
+  try {
+    const r = await fetch(RV)
+    rvData = await r.json()
+    buildFrames(); buildTicks()
+    if (!playing) goToFrame(frames.length - 1)
+  } catch(e) {}
+}, 300000)
+
+// ── INIT ─────────────────────────────────────────────
+initRadar()
+</script>
+</body>
+</html>

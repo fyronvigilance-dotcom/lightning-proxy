@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/radar", "destination": "/public/radar.html" }
+  ]
+}

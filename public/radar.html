@@ -204,16 +204,14 @@ function goToFrame(i) {
   const color = mode === 'satellite' ? 0 : 2
   const url = `${rvData.host}${f.path}/${SIZE}/{z}/{x}/{y}/${color}/1_1.png`
 
-  radarLayer = L.tileLayer(url, {
-    opacity: 0.85,
-    tileSize: SIZE,
-    zoomOffset: 0,
-    maxNativeZoom: 7,
-    maxZoom: 13,
-    minZoom: 3,
+radarLayer = L.tileLayer(url, {
+    tileSize: 256,
+    opacity: 0.88,
+    maxNativeZoom: 8,
+    maxZoom: 18,
+    minZoom: 2,
     zIndex: 10,
-    crossOrigin: true
-  }).addTo(map)
+}).addTo(map)
 
   // Heure locale France
   const d = new Date(f.time * 1000)

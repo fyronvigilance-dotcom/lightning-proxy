@@ -1,5 +1,7 @@
 {
+  "outputDirectory": "public",
   "rewrites": [
-    { "source": "/radar", "destination": "/public/radar.html" }
+    { "source": "/api/lightning", "destination": "/api/lightning.js" },
+    { "source": "/radar", "destination": "/radar.html" }
   ]
 }
